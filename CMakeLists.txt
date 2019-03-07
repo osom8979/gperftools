@@ -37,8 +37,26 @@ elseif (CMAKE_SYSTEM_NAME MATCHES "Darwin")
     set (default_enable_heap_checker NO)
 endif ()
 
-set (default_enable_libunwind YES)
-set (default_enable_backtrace YES)
+include (CheckCSourceCompiles)
+include (CheckCXXSourceCompiles)
+check_c_source_compiles ("int main() { return __s390__; }" HAVE___S390__)
+check_c_source_compiles ("int main() { return __PPC64__; }" HAVE___PPC64__)
+
+if (HAVE___S390__)
+    set (default_enable_libunwind NO)
+    set (default_enable_backtrace YES)
+else ()
+    set (default_enable_libunwind YES)
+    set (default_enable_backtrace NO)
+endif ()
+
+if (HAVE___PPC64__)
+    set (default_enable_libunwind NO)
+    set (default_tcmalloc_pagesize 64)
+else ()
+    set (default_enable_libunwind YES)
+    set (default_tcmalloc_pagesize 8)
+endif ()
 
 option (enable_cpu_profiler "build the cpu profiler" ${default_enable_cpu_profiler})
 option (enable_heap_profiler "build the heap profiler" ${default_enable_heap_profiler})
@@ -54,8 +72,9 @@ endif ()
 
 option (enable_backtrace "enable use of backtrace() for stacktrace capturing (may deadlock)" ${default_enable_backtrace})
 option (enable_libunwind "enable libunwind linking" ${default_enable_libunwind})
-option (with_tcmalloc_pagesize "Set the tcmalloc internal page size to 8K, 32K or 64K" ${default_tcmalloc_pagesize})
-option (with_tcmalloc_alignment "Set the tcmalloc allocation alignment to 8 or 16 bytes" ${default_tcmalloc_alignment})
+
+set (with_tcmalloc_pagesize ${default_tcmalloc_pagesize} CACHE STRING "Set the tcmalloc internal page size to 8K, 32K or 64K")
+set (with_tcmalloc_alignment ${default_tcmalloc_alignment} CACHE STRING "Set the tcmalloc allocation alignment to 8 or 16 bytes")
 
 if (${with_tcmalloc_pagesize} EQUAL 8)
     message (STATUS "Default tcmalloc page size")
@@ -104,34 +123,41 @@ endif ()
 #fi
 #AC_MSG_RESULT($ac_cv___attribute__aligned_fn)
 
-## TODO(csilvers): we could remove a lot when WITH_CPU_PROFILER etc is "no".
-#AC_CHECK_TYPES([__int64])       # defined in some windows platforms
-#AC_CHECK_TYPES([struct mallinfo],,, [#include <malloc.h>])
-#AC_CHECK_TYPES([Elf32_Versym],,, [#include <elf.h>])   # for vdso_support.h
-#AC_CHECK_FUNCS(sbrk)            # for tcmalloc to get memory
-#AC_CHECK_FUNCS(__sbrk)          # for tcmalloc to get memory
-#AC_CHECK_FUNCS(geteuid)         # for turning off services when run as root
-#AC_CHECK_FUNCS(fork)            # for the pthread_atfork setup
-#AC_CHECK_HEADERS(features.h)    # for vdso_support.h
-#AC_CHECK_HEADERS(malloc.h)      # some systems define stuff there, others not
-#AC_CHECK_HEADERS(glob.h)        # for heap-profile-table (cleaning up profiles)
-#AC_CHECK_HEADERS(execinfo.h)    # for stacktrace? and heapchecker_unittest
-#AC_CHECK_HEADERS(unwind.h)      # for stacktrace
-#AC_CHECK_HEADERS(sched.h)       # for being nice in our spinlock code
-#AC_CHECK_HEADERS(conflict-signal.h)      # defined on some windows platforms?
-#AC_CHECK_HEADERS(sys/prctl.h)   # for thread_lister (needed by leak-checker)
-#AC_CHECK_HEADERS(linux/ptrace.h)# also needed by leak-checker
-#AC_CHECK_HEADERS(sys/syscall.h)
-#AC_CHECK_HEADERS(sys/socket.h)  # optional; for forking out to symbolizer
-#AC_CHECK_HEADERS(sys/wait.h)    # optional; for forking out to symbolizer
-#AC_CHECK_HEADERS(poll.h)        # optional; for forking out to symbolizer
-#AC_CHECK_HEADERS(fcntl.h)       # for tcmalloc_unittest
-#AC_CHECK_HEADERS(grp.h)         # for heapchecker_unittest
-#AC_CHECK_HEADERS(pwd.h)         # for heapchecker_unittest
-#AC_CHECK_HEADERS(sys/resource.h)         # for memalign_unittest.cc
-#AC_CHECK_HEADERS(valgrind.h)    # we have a local copy if this isn't found
-#AC_CHECK_HEADERS(sys/cdefs.h)   # Where glibc defines __THROW
-#AC_CHECK_HEADERS(features.h)    # Where __GLIBC__ is defined
+include (CheckTypeSize)
+check_type_size ("__int64" HAVE____INT64) # defined in some windows platforms
+set (CMAKE_EXTRA_INCLUDE_FILES malloc.h)
+check_type_size ("struct mallinfo" HAVE_STRUCT_MALLINFO)
+set (CMAKE_EXTRA_INCLUDE_FILES elf.h)
+check_type_size ("Elf32_Versym" HAVE_ELF32_VERSYM) # for vdso_support.h
+
+include (CheckFunctionExists)
+check_function_exists (sbrk HAVE_SBRK) # for tcmalloc to get memory
+check_function_exists (__sbrk HAVE___SBRK) # for tcmalloc to get memory
+check_function_exists (geteuid HAVE_GETEUID) # for turning off services when run as root
+check_function_exists (fork HAVE_FORK) # for the pthread_atfork setup
+
+include (CheckIncludeFile)
+check_include_file (features.h HAVE_FEATURES_H) # for vdso_support.h
+check_include_file (malloc.h HAVE_MALLOC_H) # some systems define stuff there, others not
+check_include_file (glob.h HAVE_GLOB_H) # for heap-profile-table (cleaning up profiles)
+check_include_file (execinfo.h HAVE_EXECINFO_H) # for stacktrace? and heapchecker_unittest
+check_include_file (unwind.h HAVE_UNWIND_H) # for stacktrace
+check_include_file (sched.h HAVE_SCHED_H) # for being nice in our spinlock code
+check_include_file (conflict-signal.h HAVE_CONFLICT_SIGNAL_H) # defined on some windows platforms?
+check_include_file (sys/prctl.h HAVE_SYS_PRCTL_H) # for thread_lister (needed by leak-checker)
+check_include_file (linux/ptrace.h HAVE_LINUX_PTRACE_H) # also needed by leak-checker
+check_include_file (sys/syscall.h HAVE_SYS_SYSCALL_H)
+check_include_file (sys/socket.h HAVE_SYS_SOCKET_H) # optional; for forking out to symbolizer
+check_include_file (sys/wait.h HAVE_SYS_WAIT_H) # optional; for forking out to symbolizer
+check_include_file (poll.h HAVE_POLL_H) # optional; for forking out to symbolizer
+check_include_file (fcntl.h HAVE_FCNTL_H) # for tcmalloc_unittest
+check_include_file (grp.h HAVE_GRP_H) # for heapchecker_unittest
+check_include_file (pwd.h HAVE_PWD_H) # for heapchecker_unittest
+check_include_file (sys/resource.h HAVE_SYS_RESOURCE_H) # for memalign_unittest.cc
+check_include_file (valgrind.h HAVE_VALGRIND_H) # we have a local copy if this isn't found
+check_include_file (sys/cdefs.h HAVE_SYS_CDEFS_H) # Where glibc defines __THROW
+check_include_file (features.h HAVE_FEATURES_H) # Where __GLIBC__ is defined
+
 ## We also need <ucontext.h>/<sys/ucontext.h>, but we get those from
 ## AC_PC_FROM_UCONTEXT, below.
 
